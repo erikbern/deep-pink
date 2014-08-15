@@ -6,6 +6,7 @@ from sklearn.cross_validation import train_test_split
 import pickle
 import random
 import itertools
+from theano.tensor.nnet import sigmoid
 
 rng = numpy.random
 
@@ -36,7 +37,7 @@ def load_data(dir='games'):
         if len(X) % 1000 == 0:
             print len(X), '...'
 
-        if len(X) == 10000:
+        if len(X) == 100000:
             break
 
     return X, Xr
@@ -51,9 +52,9 @@ def get_data():
 
     return X_train, X_test, Xr_train, Xr_test
 
-def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=0.0):
+def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=1e-1):
     n_hidden_layers = 2
-    n_hidden = 256
+    n_hidden = 1024
 
     # Declare Theano symbolic variables
     x = T.matrix("x")
@@ -76,9 +77,9 @@ def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=0.0):
         if l < n_hidden_layers - 1:
             n_out_2 = n_hidden
             W = theano.shared(W_values(n_in_2, n_out_2), name="w%d" % l)
-            b = theano.shared(numpy.ones(n_out_2) * 1e-2, name="b%d" % l)
+            b = theano.shared(numpy.ones(n_out_2, dtype=theano.config.floatX) * 1e-2, name="b%d" % l)
         else:
-            W = theano.shared(numpy.zeros(n_in_2), name="w%d" % l)
+            W = theano.shared(numpy.zeros(n_in_2, dtype=theano.config.floatX), name="w%d" % l)
             b = theano.shared(0., name="b%d" % l)
 
         Ws.append(W)
@@ -109,7 +110,7 @@ def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=0.0):
     x_p = get_pred(x)
     xr_p = get_pred(xr)
 
-    loss = T.log(T.sigm(x_p - xr_p))
+    loss = -T.log(sigmoid(x_p - xr_p)).mean() # negative log likelihood
 
     # add regularization terms
     reg = 0
@@ -122,7 +123,7 @@ def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=0.0):
 
 
 def train():
-    X_train, X_test, Xp_train, Xp_test, Xr_train, Xr_test, M_train, M_test, Y_train, Y_test = get_data()
+    X_train, X_test, Xr_train, Xr_test = get_data()
     n_in = len(X_train[0])
 
     x, xr, Ws, bs, loss_f, reg_f = get_model(n_in)
@@ -132,13 +133,13 @@ def train():
     momentum = 0.9
     minibatch_size = min(10000, len(X_train))
 
-    learning_rate = 1e-1
+    learning_rate = 1.0
     while True:
         print 'learning rate:', learning_rate
 
         updates = []
         for param in Ws + bs:
-            param_update = theano.shared(numpy.zeros(param.get_value().shape))
+            param_update = theano.shared(numpy.zeros(param.get_value().shape, dtype=theano.config.floatX))
             updates.append((param, param - learning_rate * param_update))
             updates.append((param_update, momentum * param_update + (1. - momentum) * T.grad(obj_f, param)))
 
