@@ -40,7 +40,7 @@ def load_data(dir='games'):
         if len(X) % 1000 == 0:
             print len(X), '...'
 
-        if len(X) == 100000:
+        if len(X) == 1000000:
             break
 
     return X, Xr
@@ -167,11 +167,11 @@ def train():
             minibatch_index = random.randint(0, int(len(X_train) / minibatch_size) - 1)
             lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
             loss, reg = train(X_train[lo:hi], Xr_train[lo:hi])
-            xs = [loss, reg]
-            xs.append(sum(xs))
+            zs = [loss, reg]
+            zs.append(sum(zs))
 
             test_loss = test(X_test, Xr_test)
-            print '\t'.join(['%12.9f' % x for x in xs]) + ' test %12.9f' % test_loss
+            print '\t'.join(['%12.9f' % z for z in zs]) + ' test %12.9f' % test_loss
 
             # print '%5d: train obj: %5f (loss: %5f + reg: %5f), test loss: %5f' % (i, train_loss + train_reg, train_loss, train_reg, test_loss)
 
@@ -179,18 +179,18 @@ def train():
                 best_test_loss = test_loss
                 best_i = i
 
-            if i > best_i + 400:
+            if i > best_i + 100:
                 break
         
             if (i+1) % 100 == 0:
                 print 'dumping pickled model'
                 f = open('model.pickle', 'w')
-                def values(xs):
-                    return [x.get_value(borrow=True) for x in xs]
+                def values(zs):
+                    return [z.get_value(borrow=True) for z in zs]
                 pickle.dump((values(Ws), values(bs)), f)
                 f.close()
 
-        learning_rate = floatX(learning_rate * 0.5)
+        learning_rate *= floatX(0.5)
 
 if __name__ == '__main__':
     train()
