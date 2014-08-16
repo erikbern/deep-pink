@@ -10,6 +10,9 @@ from theano.tensor.nnet import sigmoid
 
 rng = numpy.random
 
+def floatX(x):
+    return numpy.asarray(x, dtype=theano.config.floatX)
+
 def load_data(dir='games'):
     X, Xp, Xr, M, Y = [], [], [], [], []
 
@@ -80,7 +83,7 @@ def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=1e-1):
             b = theano.shared(numpy.ones(n_out_2, dtype=theano.config.floatX) * 1e-2, name="b%d" % l)
         else:
             W = theano.shared(numpy.zeros(n_in_2, dtype=theano.config.floatX), name="w%d" % l)
-            b = theano.shared(0., name="b%d" % l)
+            b = theano.shared(floatX(0.), name="b%d" % l)
 
         Ws.append(W)
         bs.append(b)
@@ -97,11 +100,12 @@ def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=1e-1):
             h = T.dot(last_layer, Ws[l]) + bs[l]
             h = h * (h > 0)
 
-            if dropout:
-                mask = srng.binomial(n=1, p=0.5, size=h.shape)
-                last_layer = h * T.cast(mask, theano.config.floatX)
-            else:
-                last_layer = h * 0.5
+            #if dropout:
+            #    mask = srng.binomial(n=1, p=0.5, size=h.shape)
+            #    last_layer = h * T.cast(mask, theano.config.floatX)
+            #else:
+            #    last_layer = h * 0.5
+            last_layer = h
 
         # p = T.tanh(T.dot(last_layer, Ws[-1]) + bs[-1])
         p = T.dot(last_layer, Ws[-1]) + bs[-1]
@@ -130,10 +134,10 @@ def train():
 
     obj_f = loss_f + reg_f
     
-    momentum = 0.9
+    momentum = floatX(0.9)
     minibatch_size = min(10000, len(X_train))
 
-    learning_rate = 1.0
+    learning_rate = floatX(1.0)
     while True:
         print 'learning rate:', learning_rate
 
@@ -141,7 +145,7 @@ def train():
         for param in Ws + bs:
             param_update = theano.shared(numpy.zeros(param.get_value().shape, dtype=theano.config.floatX))
             updates.append((param, param - learning_rate * param_update))
-            updates.append((param_update, momentum * param_update + (1. - momentum) * T.grad(obj_f, param)))
+            updates.append((param_update, momentum * param_update + floatX(1. - momentum) * T.grad(obj_f, param)))
 
         # Compile
         train = theano.function(
@@ -186,7 +190,7 @@ def train():
                 pickle.dump((values(Ws), values(bs)), f)
                 f.close()
 
-        learning_rate *= 0.5
+        learning_rate = floatX(learning_rate * 0.5)
 
 if __name__ == '__main__':
     train()
