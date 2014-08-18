@@ -42,7 +42,11 @@ def bb2array(b, flip=False):
 
 
 def parse_game(g):
-    y = {'1-0': 1, '0-1': -1, '1/2-1/2': 0}[g.headers['Result']]
+    rm = {'1-0': 1, '0-1': -1, '1/2-1/2': 0}
+    r = g.headers['Result']
+    if r not in rm:
+        return None
+    y = rm[r]
     # print >> sys.stderr, 'result:', y
 
     # Generate all boards
@@ -96,8 +100,11 @@ def read_all_games(fn_in, fn_out):
     g.close()
 
 if __name__ == '__main__':
-    for fn_in in os.listdir('games'):
-        fn_in = os.path.join('games', fn_in)
+    d = '/mnt/games'
+    for fn_in in os.listdir(d):
+        if not fn_in.endswith('.pgn'):
+            continue
+        fn_in = os.path.join(d, fn_in)
         fn_out = fn_in.replace('.pgn', '_2.npy')
         if not os.path.exists(fn_out):
             print 'reading', fn_in

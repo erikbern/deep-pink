@@ -13,7 +13,7 @@ rng = numpy.random
 def floatX(x):
     return numpy.asarray(x, dtype=theano.config.floatX)
 
-def load_data(dir='games'):
+def load_data(dir='/mnt/games'):
     X, Xp, Xr, M, Y = [], [], [], [], []
 
     def read_stuff():
@@ -49,115 +49,126 @@ def load_data(dir='games'):
 def get_data():
     X, Xr = [numpy.array(x) for x in load_data()]
 
-    X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=0.01)
+    test_size = min(0.01, 1000.0 / len(X))
+    X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=test_size)
 
     print len(X_train), 'train set', len(X_test), 'test set'
 
     return X_train, X_test, Xr_train, Xr_test
 
-def get_model(n_in, Ws=[], bs=[], dropout=False, lambd=1e-1):
-    n_hidden_layers = 2
-    n_hidden = 1024
 
-    # Declare Theano symbolic variables
-    x = T.matrix("x")
-    xr = T.matrix("xr")
+def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=4, Ws=None, bs=None):
+    if Ws is None or bs is None:
+        print 'initializing Ws & bs'
+        Ws = []
+        bs = []
 
-    def W_values(n_in, n_out):
-        return numpy.asarray(rng.uniform(
+        def W_values(n_in, n_out):
+            return numpy.asarray(rng.uniform(
                 low=-numpy.sqrt(6. / (n_in + n_out)),
                 high=numpy.sqrt(6. / (n_in + n_out)),
-                size=(n_in, n_hidden)), dtype=theano.config.floatX)
+                size=(n_in, n_out)), dtype=theano.config.floatX)
 
-    Ws = []
-    bs = []
+        
+        for l in xrange(n_hidden_layers):
+            if l == 0:
+                n_in_2 = n_in
+            else:
+                n_in_2 = n_hidden_units
+            if l < n_hidden_layers - 1:
+                n_out_2 = n_hidden_units
+                W = W_values(n_in_2, n_out_2)
+                b = numpy.ones(n_out_2, dtype=theano.config.floatX)
+            else:
+                W = numpy.zeros(n_in_2, dtype=theano.config.floatX)
+                b = floatX(0.)
+            Ws.append(W)
+            bs.append(b)
 
-    for l in xrange(n_hidden_layers):
-        if l == 0:
-            n_in_2 = n_in
-        else:
-            n_in_2 = n_hidden
-        if l < n_hidden_layers - 1:
-            n_out_2 = n_hidden
-            W = theano.shared(W_values(n_in_2, n_out_2), name="w%d" % l)
-            b = theano.shared(numpy.ones(n_out_2, dtype=theano.config.floatX) * 1e-2, name="b%d" % l)
-        else:
-            W = theano.shared(numpy.zeros(n_in_2, dtype=theano.config.floatX), name="w%d" % l)
-            b = theano.shared(floatX(0.), name="b%d" % l)
+    Ws_s = [theano.shared(W) for W in Ws]
+    bs_s = [theano.shared(b) for b in bs]
 
-        Ws.append(W)
-        bs.append(b)
+    return Ws_s, bs_s
 
-    # Construct Theano expression graph
+
+def get_model(Ws_s, bs_s, dropout=False):
+    print 'building expression graph'
+    x_s = T.matrix('x')
+
     srng = theano.tensor.shared_randomstreams.RandomStreams(
         rng.randint(999999))
 
-    def get_pred(input):
-        last_layer = input
-        n = len(Ws)
-        for l in xrange(n - 1):
-            # h = T.tanh(T.dot(last_layer, Ws[l]) + bs[l])
-            h = T.dot(last_layer, Ws[l]) + bs[l]
-            h = h * (h > 0)
+    last_layer = x_s
+    n = len(Ws_s)
+    for l in xrange(n - 1):
+        # h = T.tanh(T.dot(last_layer, Ws[l]) + bs[l])
+        h = T.dot(last_layer, Ws_s[l]) + bs_s[l]
+        h = h * (h > 0)
+        
+        if dropout:
+            mask = srng.binomial(n=1, p=0.5, size=h.shape)
+            last_layer = h * T.cast(mask, theano.config.floatX) * 2
+        last_layer = h
 
-            #if dropout:
-            #    mask = srng.binomial(n=1, p=0.5, size=h.shape)
-            #    last_layer = h * T.cast(mask, theano.config.floatX)
-            #else:
-            #    last_layer = h * 0.5
-            last_layer = h
+    p_s = T.dot(last_layer, Ws_s[-1]) + bs_s[-1]
+    return x_s, p_s
 
-        # p = T.tanh(T.dot(last_layer, Ws[-1]) + bs[-1])
-        p = T.dot(last_layer, Ws[-1]) + bs[-1]
-        return p
 
-    x_p = get_pred(x)
-    xr_p = get_pred(xr)
+def get_training_model(Ws_s, bs_s, dropout=False, lambd=0.1):
+    # Build a dual network, one for the real move, one for a fake random move
+    # Train on a negative log likelihood of classifying the right move
+
+    x_s, x_p = get_model(x_s, Ws_s, bs_s, dropout=dropout)
+    xr_s, xr_p = get_model(xr_s, Ws_s, bs_s, dropout=dropout)
 
     loss = -T.log(sigmoid(x_p - xr_p)).mean() # negative log likelihood
 
-    # add regularization terms
+    # Add regularization terms
     reg = 0
-    for w in Ws:
-        reg += lambd * abs(w).mean()
-    for b in bs:
+    for W in Ws_s:
+        reg += lambd * abs(W).mean()
+    for b in bs_s:
         reg += lambd * abs(b).mean()
 
-    return x, xr, Ws, bs, loss, reg #, x_p, xp_p, xr_p
+    return x_s, xr_s, loss, reg
 
+
+def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
+    x_s, xr_s, loss_f, reg_f = get_training_model(Ws_s, bs_s, dropout=dropout)
+    obj_f = loss_f + reg_f
+
+    momentum = floatX(0.9)
+
+    updates = []
+    if update:
+        for param in Ws_s + bs_s:
+            param_update = theano.shared(numpy.zeros(param.get_value().shape, dtype=theano.config.floatX))
+            updates.append((param, param - learning_rate * param_update))
+            updates.append((param_update, momentum * param_update + floatX(1. - momentum) * T.grad(obj_f, param)))
+
+    print 'compiling function'
+    f = theano.function(
+        inputs=[x_s, xr_s],
+        outputs=[loss_f, reg_f],
+        updates=updates,
+        on_unused_input='warn')
+
+    return f
 
 def train():
     X_train, X_test, Xr_train, Xr_test = get_data()
     n_in = len(X_train[0])
 
-    x, xr, Ws, bs, loss_f, reg_f = get_model(n_in)
-
-    obj_f = loss_f + reg_f
+    Ws_s, bs_s = get_parameters(n_in)
     
-    momentum = floatX(0.9)
-    minibatch_size = min(10000, len(X_train))
+    minibatch_size = min(1000, len(X_train))
 
     learning_rate = floatX(1.0)
     while True:
         print 'learning rate:', learning_rate
 
-        updates = []
-        for param in Ws + bs:
-            param_update = theano.shared(numpy.zeros(param.get_value().shape, dtype=theano.config.floatX))
-            updates.append((param, param - learning_rate * param_update))
-            updates.append((param_update, momentum * param_update + floatX(1. - momentum) * T.grad(obj_f, param)))
-
-        # Compile
-        train = theano.function(
-            inputs=[x, xr],
-            outputs=[loss_f, reg_f],
-            updates=updates,
-            on_unused_input='warn')
-
-        test = theano.function(
-            inputs=[x, xr],
-            outputs=loss_f,
-            on_unused_input='warn')
+        train = get_function(Ws_s, bs_s, dropout=False, update=True, learning_rate=learning_rate)
+        test = get_function(Ws_s, bs_s, dropout=False, update=False)
 
         # Train
         best_test_loss = float('inf')
@@ -169,8 +180,7 @@ def train():
             loss, reg = train(X_train[lo:hi], Xr_train[lo:hi])
             zs = [loss, reg]
             zs.append(sum(zs))
-
-            test_loss = test(X_test, Xr_test)
+            test_loss, test_reg = test(X_test, Xr_test)
             print '\t'.join(['%12.9f' % z for z in zs]) + ' test %12.9f' % test_loss
 
             # print '%5d: train obj: %5f (loss: %5f + reg: %5f), test loss: %5f' % (i, train_loss + train_reg, train_loss, train_reg, test_loss)
@@ -179,7 +189,7 @@ def train():
                 best_test_loss = test_loss
                 best_i = i
 
-            if i > best_i + 100:
+            if i > best_i + 400 and learning_rate > 1e-3:
                 break
         
             if (i+1) % 100 == 0:
@@ -187,7 +197,7 @@ def train():
                 f = open('model.pickle', 'w')
                 def values(zs):
                     return [z.get_value(borrow=True) for z in zs]
-                pickle.dump((values(Ws), values(bs)), f)
+                pickle.dump((values(Ws_s), values(bs_s)), f)
                 f.close()
 
         learning_rate *= floatX(0.5)

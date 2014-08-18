@@ -1,7 +1,8 @@
-from train import build_network
+import train
 import pickle
 import theano
 import theano.tensor as T
+import math
 
 f = open('model.pickle')
 Ws, bs = pickle.load(f)
@@ -9,16 +10,8 @@ Ws, bs = pickle.load(f)
 print Ws
 print bs
 
-def make_theano(xs, symbol):
-    return [theano.shared(x, name='%s%d' % (symbol, i)) for i, x in enumerate(xs)]
-
-x = T.matrix("x")
-y = T.vector("y")
-
-Ws = make_theano(Ws, 'w')
-bs = make_theano(bs, 'b')
-
-p, _, _ = build_network(x, y, Ws, bs)
+Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
+x, p = train.get_model(Ws_s, bs_s)
 
 predict = theano.function(
     inputs=[x],
@@ -32,18 +25,25 @@ from parse_game import bb2array
 
 while True:
     best_move = None
-    best_score = -1
+    best_score = float('-inf')
+    scores = []
     for move in bb.legal_moves:
         bb.push(move)
         x = bb2array(bb)
         score, = predict([x])
+
+        scores.append(score)
 
         if score > best_score:
             best_move, best_score = move, score
             
         bb.pop()
 
-    print 'best move', best_move, 'score', best_score
+    # calculate softmax probability
+    m = max(scores)
+    Z = sum([math.exp(s - m) for s in scores])
+
+    print 'best move', best_move, 'score', best_score, 'prob', math.exp(best_score - m) / Z
     if best_move is None:
         break
     bb.push(best_move)
