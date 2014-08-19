@@ -50,10 +50,25 @@ while True:
 
     print bb
 
-    print 'your turn:'
-    move = raw_input()
+    def get_move(move_str):
+        try:
+            move = chess.Move.from_uci(move_str)
+        except:
+            print 'cant parse'
+            return False
+        if move not in bb.legal_moves:
+            print 'not a legal move'
+            return False
+        else:
+            return move
 
-    bb.push(chess.Move.from_uci(move))
+    while True:
+        print 'your turn:'
+        move = get_move(raw_input())
+        if move:
+            break
+
+    bb.push(move)
 
     print bb
 
