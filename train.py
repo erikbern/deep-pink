@@ -49,7 +49,7 @@ def load_data(dir='/mnt/games'):
 def get_data():
     X, Xr = [numpy.array(x) for x in load_data()]
 
-    test_size = min(0.01, 1000.0 / len(X))
+    test_size = min(0.01, 10000.0 / len(X))
     X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=test_size)
 
     print len(X_train), 'train set', len(X_test), 'test set'
@@ -118,8 +118,8 @@ def get_training_model(Ws_s, bs_s, dropout=False, lambd=0.1):
     # Build a dual network, one for the real move, one for a fake random move
     # Train on a negative log likelihood of classifying the right move
 
-    x_s, x_p = get_model(x_s, Ws_s, bs_s, dropout=dropout)
-    xr_s, xr_p = get_model(xr_s, Ws_s, bs_s, dropout=dropout)
+    x_s, x_p = get_model(Ws_s, bs_s, dropout=dropout)
+    xr_s, xr_p = get_model(Ws_s, bs_s, dropout=dropout)
 
     loss = -T.log(sigmoid(x_p - xr_p)).mean() # negative log likelihood
 
@@ -161,7 +161,7 @@ def train():
 
     Ws_s, bs_s = get_parameters(n_in)
     
-    minibatch_size = min(1000, len(X_train))
+    minibatch_size = min(10000, len(X_train))
 
     learning_rate = floatX(1.0)
     while True:
@@ -181,15 +181,13 @@ def train():
             zs = [loss, reg]
             zs.append(sum(zs))
             test_loss, test_reg = test(X_test, Xr_test)
-            print '\t'.join(['%12.9f' % z for z in zs]) + ' test %12.9f' % test_loss
-
-            # print '%5d: train obj: %5f (loss: %5f + reg: %5f), test loss: %5f' % (i, train_loss + train_reg, train_loss, train_reg, test_loss)
+            print 'iteration %6d %s test %12.9f' % (i, '\t'.join(['%12.9f' % z for z in zs]), test_loss)
 
             if test_loss < best_test_loss:
                 best_test_loss = test_loss
                 best_i = i
 
-            if i > best_i + 400 and learning_rate > 1e-3:
+            if i > best_i + 1000 and learning_rate > 1e-3:
                 break
         
             if (i+1) % 100 == 0:
