@@ -40,7 +40,7 @@ def load_data(dir='/mnt/games'):
         if len(X) % 1000 == 0:
             print len(X), '...'
 
-        if len(X) == 1000000:
+        if len(X) == 3000000:
             break
 
     return X, Xr
@@ -57,9 +57,14 @@ def get_data():
     return X_train, X_test, Xr_train, Xr_test
 
 
-def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=4, Ws=None, bs=None):
+def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=None, Ws=None, bs=None):
     if Ws is None or bs is None:
         print 'initializing Ws & bs'
+        if type(n_hidden_units) != list:
+            n_hidden_units = [n_hidden_units] * n_hidden_layers
+        else:
+            n_hidden_layers = len(n_hidden_units)
+
         Ws = []
         bs = []
 
@@ -74,9 +79,9 @@ def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=4, Ws=None, b
             if l == 0:
                 n_in_2 = n_in
             else:
-                n_in_2 = n_hidden_units
+                n_in_2 = n_hidden_units[l-1]
             if l < n_hidden_layers - 1:
-                n_out_2 = n_hidden_units
+                n_out_2 = n_hidden_units[l]
                 W = W_values(n_in_2, n_out_2)
                 b = numpy.ones(n_out_2, dtype=theano.config.floatX)
             else:
@@ -133,18 +138,30 @@ def get_training_model(Ws_s, bs_s, dropout=False, lambd=0.1):
     return x_s, xr_s, loss, reg
 
 
+def nesterov_updates(loss, all_params, learn_rate, momentum):
+    updates = []
+    all_grads = T.grad(loss, all_params)
+    for param_i, grad_i in zip(all_params, all_grads):
+        # generate a momentum parameter
+        mparam_i = theano.shared(
+            numpy.array(param_i.get_value()*0., dtype=theano.config.floatX))
+        v = momentum * mparam_i - learn_rate * grad_i
+        w = param_i + momentum * v - learn_rate * grad_i
+        updates.append((param_i, w))
+        updates.append((mparam_i, v))
+    return updates
+
+
 def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
     x_s, xr_s, loss_f, reg_f = get_training_model(Ws_s, bs_s, dropout=dropout)
     obj_f = loss_f + reg_f
 
     momentum = floatX(0.9)
 
-    updates = []
     if update:
-        for param in Ws_s + bs_s:
-            param_update = theano.shared(numpy.zeros(param.get_value().shape, dtype=theano.config.floatX))
-            updates.append((param, param - learning_rate * param_update))
-            updates.append((param_update, momentum * param_update + floatX(1. - momentum) * T.grad(obj_f, param)))
+        updates = nesterov_updates(obj_f, Ws_s + bs_s, learning_rate, momentum)
+    else:
+        updates = []
 
     print 'compiling function'
     f = theano.function(
@@ -159,7 +176,7 @@ def train():
     X_train, X_test, Xr_train, Xr_test = get_data()
     n_in = len(X_train[0])
 
-    Ws_s, bs_s = get_parameters(n_in)
+    Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[2048,2048,2048,2048])
     
     minibatch_size = min(10000, len(X_train))
 
@@ -184,10 +201,12 @@ def train():
             print 'iteration %6d %s test %12.9f' % (i, '\t'.join(['%12.9f' % z for z in zs]), test_loss)
 
             if test_loss < best_test_loss:
+                print 'new record!'
                 best_test_loss = test_loss
                 best_i = i
 
-            if i > best_i + 1000 and learning_rate > 1e-3:
+            if i > best_i + 400 and learning_rate > 0.01:
+                print 'no improvements for a long time'
                 break
         
             if (i+1) % 100 == 0:
