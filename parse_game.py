@@ -57,26 +57,29 @@ def parse_game(g):
     gns = []
     moves_left = 0
     while gn:
-        if gn.board().turn == 1 and moves_left > 0:
-            # Only evaluate positions where black is next
-            # (so that the AI can play white)
-            gns.append((moves_left, gn))
-
+        gns.append((moves_left, gn, gn.board().turn == 0))
         gn = gn.parent
         moves_left += 1
 
     print len(gns)
-    moves_left, gn = random.choice(gns)
+    if len(gns) < 10:
+        print g.end()
 
-    x = bb2array(gn.board())
+    gns.pop()
+
+    moves_left, gn, flip = random.choice(gns)
+
+    x = bb2array(gn.board(), flip=flip)
     b_parent = gn.parent.board()
-    x_parent = bb2array(gn.parent.board(), flip=True)
+    x_parent = bb2array(gn.parent.board(), flip=(not flip))
+
     # generate a random baord
     moves = list(b_parent.legal_moves)
     move = random.choice(moves)
     b_parent.push(move)
-    x_random = bb2array(b_parent)
+    x_random = bb2array(b_parent, flip=flip)
 
+    
     # print x
     # print x_parent
     # print x_random
