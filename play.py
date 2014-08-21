@@ -8,7 +8,7 @@ from parse_game import bb2array
 import heapq
 import time
 
-f = open('model_0.pickle')
+f = open('model.pickle')
 Ws, bs = pickle.load(f)
 
 print Ws
@@ -42,7 +42,7 @@ while True:
     while time.time() - t0 < 10.0:
         neg_ll, n_current = heapq.heappop(heap)
         sum_pos += math.exp(-neg_ll)
-        print sum_pos
+        print sum_pos, len(heap)
 
         gn_candidates = []
         X = []
@@ -55,30 +55,32 @@ while True:
             flip = bool(b.turn == 0)
             X.append(bb2array(b, flip=flip))
 
+        if len(X) == 0:
+            # TODO: should treat checkmate
+            continue
+
         # Use model to predict scores
         scores = predict(X)
 
         # print 'inserting scores into heap'
-        scores -= max(scores)
-        log_z = math.log(sum([math.exp(s) for s in scores]))
-        scores -= log_z
+        scores_norm = scores - max(scores)
+        log_z = math.log(sum([math.exp(s) for s in scores_norm]))
+        scores_norm -= log_z
 
-        for gn_candidate, score in zip(gn_candidates, scores):
-            # print 'potential board w score', score
-            # print gn_candidate.board()
+        for gn_candidate, score, score_norm in zip(gn_candidates, scores, scores_norm):
             n_candidate = Node(gn_candidate, score)
             n_current.children.append(n_candidate)
-            heapq.heappush(heap, (neg_ll - score, n_candidate))
+            heapq.heappush(heap, (neg_ll - score_norm, n_candidate))
+
 
     def evaluate(n):
         if n.gn.board().turn == 1:
-            score = n.score
             f = -1
         else:
-            score = None
             f = 1
 
-        best_child = None
+        score = None
+        n.best_child = None
 
         if n.children:
             for n_child in n.children:
@@ -86,12 +88,23 @@ while True:
                 if score_child:
                     if score is None or (score_child * f > score * f):
                         score = score_child
-                        best_child = n_child
+                        n.best_child = n_child
 
-        return score, best_child
+        if score is None and n.gn.board().turn == 1:
+            # Use leaf value
+            score = n.score
+
+        return score, n.best_child
 
     score, best_child = evaluate(n_root)
     print 'score:', score
+    #print 'most likely event of moves'
+    #n = n_root
+    #while n is not None:
+    #    print n.score
+    #    print n.gn.board()
+    #    print
+    #    n = n.best_child
     gn_current = best_child.gn
     bb = gn_current.board()
 
