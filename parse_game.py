@@ -5,6 +5,7 @@ import os
 import multiprocessing
 import itertools
 import random
+import h5py
 
 def read_games(fn):
     f = open(fn)
@@ -24,21 +25,22 @@ def read_games(fn):
 
 
 def bb2array(b, flip=False):
-    x = numpy.zeros((2, 6, 64), dtype=numpy.int8)
+    x = numpy.zeros(64, dtype=numpy.int8)
     
-    for pos in xrange(64):
-        p = b.piece_at(pos)
-        if p is not None:
+    for pos, piece in enumerate(b.pieces):
+        if piece != 0:
+            color = int(bool(b.occupied_co[chess.BLACK] & chess.BB_SQUARES[pos]))
             col = int(pos % 8)
             row = int(pos / 8)
             if flip:
                 row = 7-row
-                color = 1 - p.color
-            else:
-                color = p.color
-            x[p.color][p.piece_type - 1][row * 8 + col] = 1
+                color = 1 - color
 
-    return x.flatten()
+            piece = color*7 + piece
+
+            x[row * 8 + col] = piece
+
+    return x
 
 
 def parse_game(g):
@@ -67,11 +69,14 @@ def parse_game(g):
 
     gns.pop()
 
-    moves_left, gn, flip = random.choice(gns)
+    moves_left, gn, flip = random.choice(gns) # remove first position
 
-    x = bb2array(gn.board(), flip=flip)
+    b = gn.board()
+    x = bb2array(b, flip=flip)
     b_parent = gn.parent.board()
-    x_parent = bb2array(gn.parent.board(), flip=(not flip))
+    x_parent = bb2array(b_parent, flip=(not flip))
+    if flip:
+        y = -y
 
     # generate a random baord
     moves = list(b_parent.legal_moves)
@@ -79,6 +84,12 @@ def parse_game(g):
     b_parent.push(move)
     x_random = bb2array(b_parent, flip=flip)
 
+    if moves_left < 3:
+        print moves_left, 'moves left'
+        print 'winner:', y
+        print g.headers
+        print b
+        print 'checkmate:', g.end().board().is_checkmate()
     
     # print x
     # print x_parent
@@ -87,28 +98,52 @@ def parse_game(g):
     return (x, x_parent, x_random, moves_left, y)
 
 
-def read_all_games(fn_in, fn_out):
-    g = open(fn_out, 'w')
-    pool = multiprocessing.Pool()
-    for game in itertools.imap(parse_game, read_games(fn_in)): # pool.imap_unordered(parse_game, read_games(fn_in), chunksize=100):
+def read_all_games(fn_in, fn_out):    
+    g = h5py.File(fn_out, 'w')
+    X, Xr, Xp = [g.create_dataset(d, (0, 64), dtype='b', maxshape=(None, 64), chunks=True) for d in ['x', 'xr', 'xp']]
+    Y, M = [g.create_dataset(d, (0,), dtype='b', maxshape=(None,), chunks=True) for d in ['y', 'm']]
+    size = 0
+    line = 0
+    for game in read_games(fn_in):
+        game = parse_game(game)
         if game is None:
             continue
         x, x_parent, x_random, moves_left, y = game
-        numpy.save(g, x.flatten())
-        numpy.save(g, x_parent.flatten())
-        numpy.save(g, x_random.flatten())
-        numpy.save(g, moves_left)
-        numpy.save(g, y)
 
+        if line + 1 >= size:
+            g.flush()
+            size = 2 * size + 1
+            print 'resizing to', size
+            [d.resize(size=size, axis=0) for d in (X, Xr, Xp, Y, M)]
+
+        X[line] = x
+        Xr[line] = x_random
+        Xp[line] = x_parent
+        Y[line] = y
+        M[line] = moves_left
+
+        line += 1
+
+    [d.resize(size=line, axis=0) for d in (X, Xr, Xp, Y, M)]
     g.close()
 
-if __name__ == '__main__':
+def read_all_games_2(a):
+    return read_all_games(*a)
+
+def parse_dir():
+    files = []
     d = '/mnt/games'
     for fn_in in os.listdir(d):
         if not fn_in.endswith('.pgn'):
             continue
         fn_in = os.path.join(d, fn_in)
-        fn_out = fn_in.replace('.pgn', '_2.npy')
+        fn_out = fn_in.replace('.pgn', '.hdf5')
         if not os.path.exists(fn_out):
-            print 'reading', fn_in
-            read_all_games(fn_in, fn_out)
+            files.append((fn_in, fn_out))
+
+    pool = multiprocessing.Pool()
+    pool.map(read_all_games_2, files)
+
+
+if __name__ == '__main__':
+    parse_dir()

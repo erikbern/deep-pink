@@ -7,6 +7,8 @@ import pickle
 import random
 import itertools
 from theano.tensor.nnet import sigmoid
+import scipy.sparse
+import h5py
 
 rng = numpy.random
 
@@ -14,46 +16,28 @@ def floatX(x):
     return numpy.asarray(x, dtype=theano.config.floatX)
 
 def load_data(dir='/mnt/games'):
-    X, Xp, Xr, M, Y = [], [], [], [], []
+    for fn in os.listdir(dir):
+        if not fn.endswith('.hdf5'):
+            continue
 
-    def read_stuff():
-        for fn in os.listdir(dir):
-            if not fn.endswith('_2.npy'):
-                continue
-
-            fn = os.path.join(dir, fn)
-            print fn
-            f = open(fn)
-
-            while True:
-                try:
-                    x, xp, xr, m, y = [numpy.load(f) for i in xrange(5)]
-                except:
-                    break
-                
-                yield x, xp, xr, m, y
-
-    for x, xp, xr, m, y in read_stuff():
-        X.append(x)
-        Xr.append(xr)
-
-        if len(X) % 1000 == 0:
-            print len(X), '...'
-
-        if len(X) == 3000000:
-            break
-
-    return X, Xr
+        fn = os.path.join(dir, fn)
+        yield h5py.File(fn)
 
 
 def get_data():
-    X, Xr = [numpy.array(x) for x in load_data()]
+    X, Xr = [], []
+    for f in load_data():
+        X.append(f['x'].value)
+        Xr.append(f['xr'].value)
+
+    X = numpy.vstack(X)
+    Xr = numpy.vstack(Xr)
 
     test_size = min(0.01, 10000.0 / len(X))
+    print 'Splitting', len(X), 'entries into train/test set'
     X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=test_size)
 
-    print len(X_train), 'train set', len(X_test), 'test set'
-
+    print X_train.shape[0], 'train set', X_test.shape[0], 'test set'
     return X_train, X_test, Xr_train, Xr_test
 
 
@@ -83,7 +67,7 @@ def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=None, Ws=None
             if l < n_hidden_layers - 1:
                 n_out_2 = n_hidden_units[l]
                 W = W_values(n_in_2, n_out_2)
-                b = numpy.ones(n_out_2, dtype=theano.config.floatX)
+                b = numpy.zeros(n_out_2, dtype=theano.config.floatX)
             else:
                 W = numpy.zeros(n_in_2, dtype=theano.config.floatX)
                 b = floatX(0.)
@@ -100,10 +84,18 @@ def get_model(Ws_s, bs_s, dropout=False):
     print 'building expression graph'
     x_s = T.matrix('x')
 
+    # Convert input into a 12 * 64 list
+    pieces = []
+    for piece in [1,2,3,4,5,6, 8,9,10,11,12,13]:
+        # pieces.append((x_s <= piece and x_s >= piece).astype(theano.config.floatX))
+        pieces.append(T.eq(x_s, piece))
+
+    binary_layer = T.concatenate(pieces, axis=1)
+
     srng = theano.tensor.shared_randomstreams.RandomStreams(
         rng.randint(999999))
 
-    last_layer = x_s
+    last_layer = binary_layer
     n = len(Ws_s)
     for l in xrange(n - 1):
         # h = T.tanh(T.dot(last_layer, Ws[l]) + bs[l])
@@ -119,7 +111,7 @@ def get_model(Ws_s, bs_s, dropout=False):
     return x_s, p_s
 
 
-def get_training_model(Ws_s, bs_s, dropout=False, lambd=0.1):
+def get_training_model(Ws_s, bs_s, dropout=False, lambd=1.0):
     # Build a dual network, one for the real move, one for a fake random move
     # Train on a negative log likelihood of classifying the right move
 
@@ -174,13 +166,13 @@ def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
 
 def train():
     X_train, X_test, Xr_train, Xr_test = get_data()
-    n_in = len(X_train[0])
+    n_in = 12 * 64
 
     Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[2048,2048,2048,2048])
     
-    minibatch_size = min(10000, len(X_train))
+    minibatch_size = min(1000, X_train.shape[0])
 
-    learning_rate = floatX(1.0)
+    learning_rate = floatX(0.1)
     while True:
         print 'learning rate:', learning_rate
 
@@ -192,7 +184,7 @@ def train():
         best_i = None
 
         for i in itertools.count():
-            minibatch_index = random.randint(0, int(len(X_train) / minibatch_size) - 1)
+            minibatch_index = random.randint(0, int(X_train.shape[0] / minibatch_size) - 1)
             lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
             loss, reg = train(X_train[lo:hi], Xr_train[lo:hi])
             zs = [loss, reg]
