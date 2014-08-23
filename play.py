@@ -39,7 +39,7 @@ while True:
 
     # Do mini-max but evaluate all positions in the order of probability
     t0 = time.time()
-    while time.time() - t0 < 10.0:
+    while time.time() - t0 < 60.0:
         neg_ll, n_current = heapq.heappop(heap)
         sum_pos += math.exp(-neg_ll)
         print sum_pos, len(heap)
@@ -62,6 +62,8 @@ while True:
         # Use model to predict scores
         scores = predict(X)
 
+        scores *= 0.5 # some empirical smoothing to make it less confident
+
         # print 'inserting scores into heap'
         scores_norm = scores - max(scores)
         log_z = math.log(sum([math.exp(s) for s in scores_norm]))
@@ -73,7 +75,7 @@ while True:
             heapq.heappush(heap, (neg_ll - score_norm, n_candidate))
 
 
-    def evaluate(n):
+    def evaluate(n, level=0):
         if n.gn.board().turn == 1:
             f = -1
         else:
@@ -84,7 +86,7 @@ while True:
 
         if n.children:
             for n_child in n.children:
-                score_child, _ = evaluate(n_child)
+                score_child, _ = evaluate(n_child, level+1)
                 if score_child:
                     if score is None or (score_child * f > score * f):
                         score = score_child
@@ -94,17 +96,21 @@ while True:
             # Use leaf value
             score = n.score
 
+        if level < 3:
+            print '\t' * level, score, n.score, f, n.gn.move
+
         return score, n.best_child
 
+    print 'performing minimax'
     score, best_child = evaluate(n_root)
     print 'score:', score
-    #print 'most likely event of moves'
-    #n = n_root
-    #while n is not None:
-    #    print n.score
-    #    print n.gn.board()
-    #    print
-    #    n = n.best_child
+    print 'most likely event of moves'
+    n = n_root
+    while n is not None:
+        print n.score
+        print n.gn.board()
+        print
+        n = n.best_child
     gn_current = best_child.gn
     bb = gn_current.board()
 
