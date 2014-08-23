@@ -10,6 +10,8 @@ from theano.tensor.nnet import sigmoid
 import scipy.sparse
 import h5py
 
+MINIBATCH_SIZE = 1000
+
 rng = numpy.random
 
 def floatX(x):
@@ -21,19 +23,25 @@ def load_data(dir='/mnt/games'):
             continue
 
         fn = os.path.join(dir, fn)
-        yield h5py.File(fn)
+        try:
+            yield h5py.File(fn, 'r')
+        except:
+            print 'could not read', fn
 
 
 def get_data():
-    X, Xr = [], []
+    X, Xr, Y = [], [], []
     for f in load_data():
-        X.append(f['x'].value)
-        Xr.append(f['xr'].value)
+        try:
+            X.append(f['x'].value)
+            Xr.append(f['xr'].value)
+        except:
+            print 'failed reading from', f
 
     X = numpy.vstack(X)
     Xr = numpy.vstack(Xr)
 
-    test_size = min(0.01, 10000.0 / len(X))
+    test_size = min(0.01, MINIBATCH_SIZE * 1.0 / len(X))
     print 'Splitting', len(X), 'entries into train/test set'
     X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=test_size)
 
@@ -67,7 +75,8 @@ def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=None, Ws=None
             if l < n_hidden_layers - 1:
                 n_out_2 = n_hidden_units[l]
                 W = W_values(n_in_2, n_out_2)
-                b = numpy.zeros(n_out_2, dtype=theano.config.floatX)
+                gamma = 0.1 # initialize it to slightly positive so the derivative exists
+                b = numpy.ones(n_out_2, dtype=theano.config.floatX) * gamma
             else:
                 W = numpy.zeros(n_in_2, dtype=theano.config.floatX)
                 b = floatX(0.)
@@ -170,10 +179,11 @@ def train():
 
     Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[2048,2048,2048,2048])
     
-    minibatch_size = min(1000, X_train.shape[0])
+    minibatch_size = min(MINIBATCH_SIZE, X_train.shape[0])
 
     learning_rate = floatX(0.1)
-    while True:
+    for n_iterations, learning_rate in [(2000, 0.1), (2000, 0.01), (20000, 0.001)]:
+        learning_rate = floatX(learning_rate)
         print 'learning rate:', learning_rate
 
         train = get_function(Ws_s, bs_s, dropout=False, update=True, learning_rate=learning_rate)
@@ -181,9 +191,8 @@ def train():
 
         # Train
         best_test_loss = float('inf')
-        best_i = None
 
-        for i in itertools.count():
+        for i in xrange(n_iterations):
             minibatch_index = random.randint(0, int(X_train.shape[0] / minibatch_size) - 1)
             lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
             loss, reg = train(X_train[lo:hi], Xr_train[lo:hi])
@@ -195,12 +204,7 @@ def train():
             if test_loss < best_test_loss:
                 print 'new record!'
                 best_test_loss = test_loss
-                best_i = i
 
-            if i > best_i + 400 and learning_rate > 0.01:
-                print 'no improvements for a long time'
-                break
-        
             if (i+1) % 100 == 0:
                 print 'dumping pickled model'
                 f = open('model.pickle', 'w')
@@ -209,7 +213,6 @@ def train():
                 pickle.dump((values(Ws_s), values(bs_s)), f)
                 f.close()
 
-        learning_rate *= floatX(0.5)
 
 if __name__ == '__main__':
     train()
