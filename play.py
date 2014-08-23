@@ -1,4 +1,4 @@
-import train
+import train, train_y
 import pickle
 import theano
 import theano.tensor as T
@@ -8,18 +8,21 @@ from parse_game import bb2array
 import heapq
 import time
 
-f = open('model.pickle')
-Ws, bs = pickle.load(f)
+def get_model_from_pickle(fn):
+    f = open(fn)
+    Ws, bs = pickle.load(f)
+    
+    Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
+    x, p = train.get_model(Ws_s, bs_s)
+    
+    predict = theano.function(
+        inputs=[x],
+        outputs=p)
 
-print Ws
-print bs
+    return predict
 
-Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
-x, p = train.get_model(Ws_s, bs_s)
-
-predict = theano.function(
-    inputs=[x],
-    outputs=p)
+move_func = get_model_from_pickle('model.pickle')
+eval_func = get_model_from_pickle('model_y.pickle')
 
 gn_current = chess.pgn.Game()
 
@@ -39,7 +42,7 @@ while True:
 
     # Do mini-max but evaluate all positions in the order of probability
     t0 = time.time()
-    while time.time() - t0 < 60.0:
+    while time.time() - t0 < 10.0:
         neg_ll, n_current = heapq.heappop(heap)
         sum_pos += math.exp(-neg_ll)
         print sum_pos, len(heap)
@@ -60,19 +63,20 @@ while True:
             continue
 
         # Use model to predict scores
-        scores = predict(X)
+        move_scores = move_func(X)
+        eval_scores = eval_func(X)
 
-        scores *= 0.5 # some empirical smoothing to make it less confident
+        move_scores *= 0.5 # some smoothing heuristic to make it less confident
 
         # print 'inserting scores into heap'
-        scores_norm = scores - max(scores)
-        log_z = math.log(sum([math.exp(s) for s in scores_norm]))
-        scores_norm -= log_z
+        move_scores -= max(move_scores)
+        log_z = math.log(sum([math.exp(s) for s in move_scores]))
+        move_scores -= log_z
 
-        for gn_candidate, score, score_norm in zip(gn_candidates, scores, scores_norm):
-            n_candidate = Node(gn_candidate, score)
+        for gn_candidate, move_score, eval_score in zip(gn_candidates, move_scores, eval_scores):
+            n_candidate = Node(gn_candidate, eval_score)
             n_current.children.append(n_candidate)
-            heapq.heappush(heap, (neg_ll - score_norm, n_candidate))
+            heapq.heappush(heap, (neg_ll - move_score, n_candidate))
 
 
     def evaluate(n, level=0):
@@ -92,7 +96,7 @@ while True:
                         score = score_child
                         n.best_child = n_child
 
-        if score is None and n.gn.board().turn == 1:
+        if score is None:
             # Use leaf value
             score = n.score
 

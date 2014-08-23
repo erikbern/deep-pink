@@ -29,24 +29,30 @@ def load_data(dir='/mnt/games'):
             print 'could not read', fn
 
 
-def get_data():
-    X, Xr, Y = [], [], []
+def get_data(series=['x', 'xr']):
+    data = [[] for s in series]
     for f in load_data():
         try:
-            X.append(f['x'].value)
-            Xr.append(f['xr'].value)
+            for i, s in enumerate(series):
+                data[i].append(f[s].value)
         except:
+            raise
             print 'failed reading from', f
 
-    X = numpy.vstack(X)
-    Xr = numpy.vstack(Xr)
+    def stack(vectors):
+        if len(vectors[0].shape) > 1:
+            return numpy.vstack(vectors)
+        else:
+            return numpy.hstack(vectors)
 
-    test_size = min(0.01, MINIBATCH_SIZE * 1.0 / len(X))
-    print 'Splitting', len(X), 'entries into train/test set'
-    X_train, X_test, Xr_train, Xr_test = train_test_split(X, Xr, test_size=test_size)
+    data = [stack(d) for d in data]
 
-    print X_train.shape[0], 'train set', X_test.shape[0], 'test set'
-    return X_train, X_test, Xr_train, Xr_test
+    test_size = min(0.01, MINIBATCH_SIZE * 1.0 / len(data[0]))
+    print 'Splitting', len(data[0]), 'entries into train/test set'
+    data = train_test_split(*data, test_size=test_size)
+
+    print data[0].shape[0], 'train set', data[1].shape[0], 'test set'
+    return data
 
 
 def get_parameters(n_in=None, n_hidden_units=2048, n_hidden_layers=None, Ws=None, bs=None):
