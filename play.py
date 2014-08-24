@@ -66,7 +66,7 @@ while True:
         move_scores = move_func(X)
         eval_scores = eval_func(X)
 
-        move_scores *= 0.5 # some smoothing heuristic to make it less confident
+        move_scores *= 0.75 # some smoothing heuristic to make it less confident
 
         # print 'inserting scores into heap'
         move_scores -= max(move_scores)
@@ -80,11 +80,6 @@ while True:
 
 
     def evaluate(n, level=0):
-        if n.gn.board().turn == 1:
-            f = -1
-        else:
-            f = 1
-
         score = None
         n.best_child = None
 
@@ -92,7 +87,7 @@ while True:
             for n_child in n.children:
                 score_child, _ = evaluate(n_child, level+1)
                 if score_child:
-                    if score is None or (score_child * f > score * f):
+                    if score is None or score_child < score:
                         score = score_child
                         n.best_child = n_child
 
@@ -101,9 +96,9 @@ while True:
             score = n.score
 
         if level < 3:
-            print '\t' * level, score, n.score, f, n.gn.move
+            print '\t' * level, score, n.score, n.gn.move
 
-        return score, n.best_child
+        return -score, n.best_child
 
     print 'performing minimax'
     score, best_child = evaluate(n_root)
