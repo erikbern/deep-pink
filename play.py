@@ -21,26 +21,17 @@ def get_model_from_pickle(fn):
 
     return predict
 
-move_func = get_model_from_pickle('model.pickle')
-eval_func = get_model_from_pickle('model_y.pickle')
-
-gn_current = chess.pgn.Game()
-
 class Node(object):
     def __init__(self, gn=None, score=None):
         self.gn = gn
         self.children = []
         self.score = score
 
-while True:
-    # Keep a heap of the most probable games
-    n_root = Node(gn=gn_current)
-    heap = []
-    heap.append((0.0, n_root))
+def search(heap, move_func, eval_func):
+    ''' Traverse game tree in the order of probability '''
 
     sum_pos = 0.0
 
-    # Do mini-max but evaluate all positions in the order of probability
     t0 = time.time()
     while time.time() - t0 < 10.0:
         neg_ll, n_current = heapq.heappop(heap)
@@ -79,29 +70,37 @@ while True:
             heapq.heappush(heap, (neg_ll - move_score, n_candidate))
 
 
-    def evaluate(n, level=0):
-        score = None
-        n.best_child = None
+def minimax(n, level=0):
+    score = None
+    n.best_child = None
 
-        if n.children:
-            for n_child in n.children:
-                score_child, _ = evaluate(n_child, level+1)
-                if score_child:
-                    if score is None or score_child < score:
-                        score = score_child
-                        n.best_child = n_child
+    if n.children:
+        for n_child in n.children:
+            score_child, _ = minimax(n_child, level+1)
+            if score_child:
+                if score is None or score_child < score:
+                    score = score_child
+                    n.best_child = n_child
 
-        if score is None:
-            # Use leaf value
-            score = n.score
+    if score is None:
+        # Use leaf value
+        score = n.score
 
-        if level < 3:
-            print '\t' * level, score, n.score, n.gn.move
+    if level < 3:
+        print '\t' * level, score, n.score, n.gn.move
+        
+    return -score, n.best_child
 
-        return -score, n.best_child
+
+def computer_move(gn_current, move_func, eval_func):
+    n_root = Node(gn=gn_current)
+    heap = []
+    heap.append((0.0, n_root))
+    
+    search(heap, move_func, eval_func)
 
     print 'performing minimax'
-    score, best_child = evaluate(n_root)
+    score, best_child = minimax(n_root)
     print 'score:', score
     print 'most likely event of moves'
     n = n_root
@@ -110,7 +109,12 @@ while True:
         print n.gn.board()
         print
         n = n.best_child
-    gn_current = best_child.gn
+
+    print best_child.gn.move
+    return best_child.gn
+
+
+def human_move(gn_current):
     bb = gn_current.board()
 
     print bb
@@ -138,5 +142,19 @@ while True:
     gn_new.move = move
 
     print gn_new.board()
-    gn_current = gn_new
+    return gn_new
 
+
+def play():
+    move_func = get_model_from_pickle('model.pickle')
+    eval_func = get_model_from_pickle('model_y.pickle')
+
+
+    gn_current = chess.pgn.Game()
+
+    while True:
+        gn_current = computer_move(gn_current, move_func, eval_func)
+        gn_current = human_move(gn_current)
+        
+if __name__ == '__main__':
+    play()
