@@ -18,7 +18,12 @@ def get_training_model(Ws_s, bs_s, dropout=False, lambd=1.0):
 
     y = T.vector('y') # whether current player wins
 
-    loss = 0.5 * ((T.tanh(x_p) - y) ** 2 + (T.tanh(xp_p) + y) ** 2).mean()
+    t = 0.5 * (y + 1) # change scale to {0, 0.5, 1.0}
+
+    loss_a = -t * T.log(sigmoid(x_p)) - (1-t) * T.log(sigmoid(-x_p))
+    loss_b = -t * T.log(sigmoid(-xp_p)) - (1-t) * T.log(sigmoid(xp_p))
+
+    loss = 0.5 * (loss_a + loss_b).mean()
 
     reg = 0
     for W in Ws_s:
@@ -63,7 +68,7 @@ def train():
 
     minibatch_size = min(MINIBATCH_SIZE, X_train.shape[0])
 
-    for n_iterations, learning_rate in [(2000, 1e-3), (2000, 1e-4), (20000, 1e-5)]:
+    for n_iterations, learning_rate in [(20000, 1e-3), (20000, 1e-4), (20000, 1e-5)]:
         learning_rate = floatX(learning_rate)
         print 'learning rate:', learning_rate
 
