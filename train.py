@@ -122,7 +122,8 @@ def get_model(Ws_s, bs_s, dropout=False):
         
         if dropout[l]:
             mask = srng.binomial(n=1, p=0.5, size=h.shape)
-            last_layer = h * T.cast(mask, theano.config.floatX) * 2
+            h = h * T.cast(mask, theano.config.floatX) * 2
+
         last_layer = h
 
     p_s = T.dot(last_layer, Ws_s[-1]) + bs_s[-1]
