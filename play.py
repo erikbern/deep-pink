@@ -147,7 +147,7 @@ def human_move(gn_current):
 
 def play():
     move_func = get_model_from_pickle('model.pickle')
-    eval_func = get_model_from_pickle('model_y.pickle')
+    eval_func = move_func # get_model_from_pickle('model_y.pickle')
 
 
     gn_current = chess.pgn.Game()

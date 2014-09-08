@@ -10,7 +10,7 @@ from theano.tensor.nnet import sigmoid
 import scipy.sparse
 import h5py
 
-MINIBATCH_SIZE = 1000
+MINIBATCH_SIZE = 500
 
 rng = numpy.random
 
@@ -47,7 +47,7 @@ def get_data(series=['x', 'xr']):
 
     data = [stack(d) for d in data]
 
-    test_size = min(0.01, MINIBATCH_SIZE * 1.0 / len(data[0]))
+    test_size = 10000.0 / len(data[0])
     print 'Splitting', len(data[0]), 'entries into train/test set'
     data = train_test_split(*data, test_size=test_size)
 
@@ -99,6 +99,9 @@ def get_model(Ws_s, bs_s, dropout=False):
     print 'building expression graph'
     x_s = T.matrix('x')
 
+    if type(dropout) != list:
+        dropout = [dropout] * len(Ws_s)
+
     # Convert input into a 12 * 64 list
     pieces = []
     for piece in [1,2,3,4,5,6, 8,9,10,11,12,13]:
@@ -117,7 +120,7 @@ def get_model(Ws_s, bs_s, dropout=False):
         h = T.dot(last_layer, Ws_s[l]) + bs_s[l]
         h = h * (h > 0)
         
-        if dropout:
+        if dropout[l]:
             mask = srng.binomial(n=1, p=0.5, size=h.shape)
             last_layer = h * T.cast(mask, theano.config.floatX) * 2
         last_layer = h
@@ -126,23 +129,27 @@ def get_model(Ws_s, bs_s, dropout=False):
     return x_s, p_s
 
 
-def get_training_model(Ws_s, bs_s, dropout=False, lambd=1.0):
+def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0):
     # Build a dual network, one for the real move, one for a fake random move
     # Train on a negative log likelihood of classifying the right move
 
-    x_s, x_p = get_model(Ws_s, bs_s, dropout=dropout)
+    xc_s, xc_p = get_model(Ws_s, bs_s, dropout=dropout)
     xr_s, xr_p = get_model(Ws_s, bs_s, dropout=dropout)
+    xp_s, xp_p = get_model(Ws_s, bs_s, dropout=dropout)
 
-    loss = -T.log(sigmoid(x_p - xr_p)).mean() # negative log likelihood
+    #loss = -T.log(sigmoid(xc_p + xp_p)).mean() # negative log likelihood
+    #loss += -T.log(sigmoid(-xp_p - xr_p)).mean() # negative log likelihood
+
+    loss = -T.log(sigmoid(xc_p - xr_p)).mean()
+    loss += -T.log(sigmoid(xc_p + xp_p)).mean()
+    loss += -T.log(sigmoid(-xc_p - xp_p)).mean()
 
     # Add regularization terms
     reg = 0
-    for W in Ws_s:
-        reg += lambd * abs(W).mean()
-    for b in bs_s:
-        reg += lambd * abs(b).mean()
+    for x in Ws_s + bs_s:
+        reg += lambd * (x ** 2).mean()
 
-    return x_s, xr_s, loss, reg
+    return xc_s, xr_s, xp_s, loss, reg
 
 
 def nesterov_updates(loss, all_params, learn_rate, momentum):
@@ -159,9 +166,11 @@ def nesterov_updates(loss, all_params, learn_rate, momentum):
     return updates
 
 
-def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
-    x_s, xr_s, loss_f, reg_f = get_training_model(Ws_s, bs_s, dropout=dropout)
+def get_function(Ws_s, bs_s, dropout=False, update=False):
+    xc_s, xr_s, xp_s, loss_f, reg_f = get_training_model(Ws_s, bs_s, dropout=dropout)
     obj_f = loss_f + reg_f
+
+    learning_rate = T.scalar(dtype=theano.config.floatX)
 
     momentum = floatX(0.9)
 
@@ -172,7 +181,7 @@ def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
 
     print 'compiling function'
     f = theano.function(
-        inputs=[x_s, xr_s],
+        inputs=[xc_s, xr_s, xp_s, learning_rate],
         outputs=[loss_f, reg_f],
         updates=updates,
         on_unused_input='warn')
@@ -180,44 +189,52 @@ def get_function(Ws_s, bs_s, dropout=False, update=False, learning_rate=None):
     return f
 
 def train():
-    X_train, X_test, Xr_train, Xr_test = get_data()
+    Xc_train, Xc_test, Xr_train, Xr_test, Xp_train, Xp_test = get_data(['x', 'xr', 'xp'])
     n_in = 12 * 64
 
-    Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[2048,2048,2048,2048])
+    Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[8192,4096,2048,1024,1024,1024])
     
-    minibatch_size = min(MINIBATCH_SIZE, X_train.shape[0])
+    minibatch_size = min(MINIBATCH_SIZE, Xc_train.shape[0])
 
-    learning_rate = floatX(0.1)
-    for n_iterations, learning_rate in [(2000, 0.1), (2000, 0.01), (20000, 0.001)]:
-        learning_rate = floatX(learning_rate)
-        print 'learning rate:', learning_rate
+    train = get_function(Ws_s, bs_s, update=True, dropout=[False,False,False,True,True,True])
+    test = get_function(Ws_s, bs_s, update=False, dropout=False)
 
-        train = get_function(Ws_s, bs_s, dropout=False, update=True, learning_rate=learning_rate)
-        test = get_function(Ws_s, bs_s, dropout=False, update=False)
+    best_test_loss = float('inf')
+    prev_test_loss = float('inf')
+    learning_rate = 0.03
+    
+    i = 0
+    while True:
+        i += 1
 
-        # Train
-        best_test_loss = float('inf')
+        minibatch_index = random.randint(0, int(Xc_train.shape[0] / minibatch_size) - 1)
+        lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
+        loss, reg = train(Xc_train[lo:hi], Xr_train[lo:hi], Xp_train[lo:hi], learning_rate)
+        zs = [loss, reg]
+        zs.append(sum(zs))
+        print 'iteration %6d learning rate %12.9f: %s' % (i, learning_rate, '\t'.join(['%12.9f' % z for z in zs]))
 
-        for i in xrange(n_iterations):
-            minibatch_index = random.randint(0, int(X_train.shape[0] / minibatch_size) - 1)
-            lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
-            loss, reg = train(X_train[lo:hi], Xr_train[lo:hi])
-            zs = [loss, reg]
-            zs.append(sum(zs))
-            test_loss, test_reg = test(X_test, Xr_test)
-            print 'iteration %6d %s test %12.9f' % (i, '\t'.join(['%12.9f' % z for z in zs]), test_loss)
+        if i % 200 == 0:
+            test_loss, test_reg = test(Xc_test, Xr_test, Xp_test, learning_rate)
+            print 'test loss %12.9f' % test_loss
 
             if test_loss < best_test_loss:
                 print 'new record!'
                 best_test_loss = test_loss
 
-            if (i+1) % 100 == 0:
                 print 'dumping pickled model'
                 f = open('model.pickle', 'w')
                 def values(zs):
                     return [z.get_value(borrow=True) for z in zs]
                 pickle.dump((values(Ws_s), values(bs_s)), f)
                 f.close()
+
+        if i % 5000 == 0:
+            if test_loss < prev_test_loss:
+                learning_rate = floatX(learning_rate * 1.05)
+            else:
+                learning_rate = floatX(learning_rate * 0.70)
+            prev_test_loss = test_loss
 
 
 if __name__ == '__main__':
