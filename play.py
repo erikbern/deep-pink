@@ -38,6 +38,15 @@ def search(heap, move_func, eval_func):
         sum_pos += math.exp(-neg_ll)
         print sum_pos, len(heap)
 
+        b = n_current.gn.board()
+        if b.is_checkmate():
+            if b.turn == 0:
+                n_current.score = float('-inf')
+            else:
+                n_current.score = float('inf')
+        elif b.is_stalemate():
+            n_current.score = 0.0
+
         gn_candidates = []
         X = []
         for move in n_current.gn.board().legal_moves:
