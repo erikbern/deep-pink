@@ -33,8 +33,7 @@ def search(heap, move_func, eval_func):
     sum_pos = 0.0
 
     t0 = time.time()
-    # while time.time() - t0 < 10.0 and len(heap) > 0:
-    for i in xrange(1):
+    while time.time() - t0 < 10.0 and len(heap) > 0:
         neg_ll, n_current = heapq.heappop(heap)
         sum_pos += math.exp(-neg_ll)
         # print sum_pos, len(heap)
@@ -84,16 +83,11 @@ def minimax(n, level=0):
     score = None
     n.best_child = None
 
-    if level % 2 == 0:
-        f = -1
-    else:
-        f = 1
-        
     if n.children:
         for n_child in n.children:
             score_child, _ = minimax(n_child, level+1)
             if score_child:
-                if score is None or score_child * f < score * f:
+                if score is None or score_child < score:
                     score = score_child
                     n.best_child = n_child
 
@@ -104,7 +98,7 @@ def minimax(n, level=0):
     if level < 99:
         print '\t' * level, level, score, n.score, n.gn.move
         
-    return score, n.best_child
+    return -score, n.best_child
 
 class Player(object):
     def move(self, gn_current):
@@ -198,7 +192,7 @@ class Sunfish(Player):
         return gn_new
 
 def play():
-    move_func = get_model_from_pickle('model.pickle')
+    move_func = get_model_from_pickle('model_big.pickle')
     eval_func = move_func # get_model_from_pickle('model_y.pickle')
 
     gn_current = chess.pgn.Game()
