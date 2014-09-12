@@ -9,8 +9,10 @@ import itertools
 from theano.tensor.nnet import sigmoid
 import scipy.sparse
 import h5py
+import math
+import time
 
-MINIBATCH_SIZE = 500
+MINIBATCH_SIZE = 2000
 
 rng = numpy.random
 
@@ -130,7 +132,7 @@ def get_model(Ws_s, bs_s, dropout=False):
     return x_s, p_s
 
 
-def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0):
+def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0, kappa=4.0):
     # Build a dual network, one for the real move, one for a fake random move
     # Train on a negative log likelihood of classifying the right move
 
@@ -141,16 +143,20 @@ def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0):
     #loss = -T.log(sigmoid(xc_p + xp_p)).mean() # negative log likelihood
     #loss += -T.log(sigmoid(-xp_p - xr_p)).mean() # negative log likelihood
 
-    loss = -T.log(sigmoid(xc_p - xr_p)).mean()
-    loss += -T.log(sigmoid(xc_p + xp_p)).mean()
-    loss += -T.log(sigmoid(-xc_p - xp_p)).mean()
+    cr_diff = xc_p - xr_p
+    loss_a = -T.log(sigmoid(cr_diff)).mean()
+
+    cp_diff = kappa * (xc_p + xp_p)
+    loss_b = -T.log(sigmoid( cp_diff)).mean()
+    loss_c = -T.log(sigmoid(-cp_diff)).mean()
 
     # Add regularization terms
     reg = 0
     for x in Ws_s + bs_s:
         reg += lambd * (x ** 2).mean()
 
-    return xc_s, xr_s, xp_s, loss, reg
+    loss = loss_a + loss_b + loss_c
+    return xc_s, xr_s, xp_s, loss, reg, loss_a, loss_b, loss_c
 
 
 def nesterov_updates(loss, all_params, learn_rate, momentum):
@@ -168,7 +174,7 @@ def nesterov_updates(loss, all_params, learn_rate, momentum):
 
 
 def get_function(Ws_s, bs_s, dropout=False, update=False):
-    xc_s, xr_s, xp_s, loss_f, reg_f = get_training_model(Ws_s, bs_s, dropout=dropout)
+    xc_s, xr_s, xp_s, loss_f, reg_f, loss_a_f, loss_b_f, loss_c_f = get_training_model(Ws_s, bs_s, dropout=dropout)
     obj_f = loss_f + reg_f
 
     learning_rate = T.scalar(dtype=theano.config.floatX)
@@ -183,7 +189,7 @@ def get_function(Ws_s, bs_s, dropout=False, update=False):
     print 'compiling function'
     f = theano.function(
         inputs=[xc_s, xr_s, xp_s, learning_rate],
-        outputs=[loss_f, reg_f],
+        outputs=[loss_f, reg_f, loss_a_f, loss_b_f, loss_c_f],
         updates=updates,
         on_unused_input='warn')
 
@@ -191,32 +197,39 @@ def get_function(Ws_s, bs_s, dropout=False, update=False):
 
 def train():
     Xc_train, Xc_test, Xr_train, Xr_test, Xp_train, Xp_test = get_data(['x', 'xr', 'xp'])
+    for board in [Xc_train[0], Xp_train[0]]:
+        for row in xrange(8):
+            print ' '.join('%2d' % x for x in board[(row*8):((row+1)*8)])
+        print
+
     n_in = 12 * 64
 
-    Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[8192,4096,2048,1024,1024,1024])
+    Ws_s, bs_s = get_parameters(n_in=n_in, n_hidden_units=[2048] * 3)
     
     minibatch_size = min(MINIBATCH_SIZE, Xc_train.shape[0])
 
-    train = get_function(Ws_s, bs_s, update=True, dropout=[False,False,False,True,True,True])
+    train = get_function(Ws_s, bs_s, update=True, dropout=False)
     test = get_function(Ws_s, bs_s, update=False, dropout=False)
 
     best_test_loss = float('inf')
-    prev_test_loss = float('inf')
-    learning_rate = 0.03
+    base_learning_rate = 0.01
+    t0 = time.time()
     
     i = 0
     while True:
         i += 1
+        learning_rate = floatX(base_learning_rate * math.exp(-(time.time() - t0) / 86400))
 
         minibatch_index = random.randint(0, int(Xc_train.shape[0] / minibatch_size) - 1)
         lo, hi = minibatch_index * minibatch_size, (minibatch_index + 1) * minibatch_size
-        loss, reg = train(Xc_train[lo:hi], Xr_train[lo:hi], Xp_train[lo:hi], learning_rate)
-        zs = [loss, reg]
+        loss, reg, loss_a, loss_b, loss_c = train(Xc_train[lo:hi], Xr_train[lo:hi], Xp_train[lo:hi], learning_rate)
+
+        zs = [loss, loss_a, loss_b, loss_c, reg]
         zs.append(sum(zs))
         print 'iteration %6d learning rate %12.9f: %s' % (i, learning_rate, '\t'.join(['%12.9f' % z for z in zs]))
 
         if i % 200 == 0:
-            test_loss, test_reg = test(Xc_test, Xr_test, Xp_test, learning_rate)
+            test_loss, test_reg, _, _, _ = test(Xc_test, Xr_test, Xp_test, learning_rate)
             print 'test loss %12.9f' % test_loss
 
             if test_loss < best_test_loss:
@@ -229,13 +242,6 @@ def train():
                     return [z.get_value(borrow=True) for z in zs]
                 pickle.dump((values(Ws_s), values(bs_s)), f)
                 f.close()
-
-        if i % 5000 == 0:
-            if test_loss < prev_test_loss:
-                learning_rate = floatX(learning_rate * 1.05)
-            else:
-                learning_rate = floatX(learning_rate * 0.70)
-            prev_test_loss = test_loss
 
 
 if __name__ == '__main__':
