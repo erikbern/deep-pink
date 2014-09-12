@@ -65,7 +65,7 @@ def search(heap, move_func, eval_func):
 
         # Use model to predict scores
         move_scores = move_func(X)
-        eval_scores = move_scores # eval_func(X)
+        eval_scores = [x for x in move_scores] # eval_func(X)
 
         move_scores *= 0.75 # some smoothing heuristic to make it less confident
 
