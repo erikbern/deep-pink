@@ -132,7 +132,7 @@ def get_model(Ws_s, bs_s, dropout=False):
     return x_s, p_s
 
 
-def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0, kappa=4.0):
+def get_training_model(Ws_s, bs_s, dropout=False, lambd=10.0, kappa=1.0):
     # Build a dual network, one for the real move, one for a fake random move
     # Train on a negative log likelihood of classifying the right move
 
@@ -212,7 +212,7 @@ def train():
     test = get_function(Ws_s, bs_s, update=False, dropout=False)
 
     best_test_loss = float('inf')
-    base_learning_rate = 0.01
+    base_learning_rate = 0.03
     t0 = time.time()
     
     i = 0
@@ -225,7 +225,6 @@ def train():
         loss, reg, loss_a, loss_b, loss_c = train(Xc_train[lo:hi], Xr_train[lo:hi], Xp_train[lo:hi], learning_rate)
 
         zs = [loss, loss_a, loss_b, loss_c, reg]
-        zs.append(sum(zs))
         print 'iteration %6d learning rate %12.9f: %s' % (i, learning_rate, '\t'.join(['%12.9f' % z for z in zs]))
 
         if i % 200 == 0:
