@@ -1,4 +1,4 @@
-import train, train_y
+import train
 import pickle
 import theano
 import theano.tensor as T
@@ -21,84 +21,59 @@ def get_model_from_pickle(fn):
 
     return predict
 
-class Node(object):
-    def __init__(self, gn=None, score=None):
-        self.gn = gn
-        self.children = []
-        self.score = score
 
-def search(heap, move_func, eval_func):
-    ''' Traverse game tree in the order of probability '''
+def negamax(gn_current, depth, alpha, beta, color, func):
+    b = gn_current.board()
+    # print depth, alpha, beta, color
+    # print b
 
-    sum_pos = 0.0
+    if b.is_checkmate():
+        return float('-inf'), None
+    elif b.is_stalemate():
+        return 0.0, None
 
-    t0 = time.time()
-    while time.time() - t0 < 10.0 and len(heap) > 0:
-        neg_ll, n_current = heapq.heappop(heap)
-        sum_pos += math.exp(-neg_ll)
-        # print sum_pos, len(heap)
+    gn_candidates = []
+    X = []
+    for move in gn_current.board().legal_moves:
+        gn_candidate = chess.pgn.GameNode()
+        gn_candidate.parent = gn_current
+        gn_candidate.move = move
+        gn_candidates.append(gn_candidate)
+        b = gn_candidate.board()
+        flip = bool(b.turn == 0)
+        X.append(bb2array(b, flip=flip))
 
-        b = n_current.gn.board()
-        if b.is_checkmate():
-            if b.turn == 0:
-                n_current.score = float('-inf')
-            else:
-                n_current.score = float('inf')
-        elif b.is_stalemate():
-            n_current.score = 0.0
+    if len(X) == 0:
+        raise Exception('eh?')
+        # TODO: should treat checkmate
 
-        gn_candidates = []
-        X = []
-        for move in n_current.gn.board().legal_moves:
-            gn_candidate = chess.pgn.GameNode()
-            gn_candidate.parent = n_current.gn
-            gn_candidate.move = move
-            gn_candidates.append(gn_candidate)
-            b = gn_candidate.board()
-            flip = bool(b.turn == 0)
-            X.append(bb2array(b, flip=flip))
+    # Use model to predict scores
+    scores = func(X)
 
-        if len(X) == 0:
-            # TODO: should treat checkmate
-            continue
+    child_nodes = sorted(zip(scores, gn_candidates), reverse=(color==1))
 
-        # Use model to predict scores
-        move_scores = move_func(X)
-        eval_scores = [x for x in move_scores] # eval_func(X)
+    best_value = float('-inf')
+    best_move = None
+    
+    for score, gn_candidate in child_nodes:
+        if depth == 1:
+            value = score # * color
+        else:
+            neg_value, _ = negamax(gn_candidate, depth-1, -beta, -alpha, -color, func)
+            value = -neg_value
 
-        move_scores *= 0.75 # some smoothing heuristic to make it less confident
+        if value > best_value:
+            best_value = value
+            best_move = gn_candidate.move
 
-        # print 'inserting scores into heap'
-        move_scores -= max(move_scores)
-        log_z = math.log(sum([math.exp(s) for s in move_scores]))
-        move_scores -= log_z
+        if value > alpha:
+            alpha = value
 
-        for gn_candidate, move_score, eval_score in zip(gn_candidates, move_scores, eval_scores):
-            n_candidate = Node(gn_candidate, eval_score)
-            n_current.children.append(n_candidate)
-            heapq.heappush(heap, (neg_ll - move_score, n_candidate))
+        if alpha > beta:
+            break
 
+    return best_value, best_move
 
-def minimax(n, level=0):
-    score = None
-    n.best_child = None
-
-    if n.children:
-        for n_child in n.children:
-            score_child, _ = minimax(n_child, level+1)
-            if score_child:
-                if score is None or score_child < score:
-                    score = score_child
-                    n.best_child = n_child
-
-    if score is None:
-        # Use leaf value
-        score = n.score
-
-    if level < 99:
-        print '\t' * level, level, score, n.score, n.gn.move
-        
-    return -score, n.best_child
 
 class Player(object):
     def move(self, gn_current):
@@ -106,31 +81,27 @@ class Player(object):
 
 
 class Computer(Player):
-    def __init__(self, move_func, eval_func):
-        self._move_func = move_func
-        self._eval_func = eval_func
+    def __init__(self, func):
+        self._func = func
 
     def move(self, gn_current):
         assert(gn_current.board().turn == 0)
-        n_root = Node(gn=gn_current)
-        heap = []
-        heap.append((0.0, n_root))
-    
-        search(heap, self._move_func, self._eval_func)
-        
-        print 'performing minimax'
-        score, best_child = minimax(n_root)
-        print 'score:', score
-        #print 'most likely event of moves'
-        #n = n_root
-        #while n is not None:
-        #    print n.score
-        #    print n.gn.board()
-        #    print
-        #    n = n.best_child
 
-        print best_child.gn.move
-        return best_child.gn
+        for depth in xrange(1, 5):
+            alpha = float('-inf')
+            beta = float('inf')
+            
+            t0 = time.time()
+            best_value, best_move = negamax(gn_current, depth, alpha, beta, 1, self._func)
+            print depth, best_value, best_move, time.time() - t0
+            depth += 1
+
+        gn_new = chess.pgn.GameNode()
+        gn_new.parent = gn_current
+        gn_new.move = best_move
+
+        return gn_new
+
 
 class Human(Player):
     def move(self, gn_current):
@@ -160,8 +131,8 @@ class Human(Player):
         gn_new.parent = gn_current
         gn_new.move = move
         
-        print gn_new.board()
         return gn_new
+
 
 class Sunfish(Player):
     def __init__(self):
@@ -192,12 +163,11 @@ class Sunfish(Player):
         return gn_new
 
 def play():
-    move_func = get_model_from_pickle('model_big.pickle')
-    eval_func = move_func # get_model_from_pickle('model_y.pickle')
+    func = get_model_from_pickle('model.pickle')
 
     gn_current = chess.pgn.Game()
 
-    player_a = Computer(move_func, eval_func)
+    player_a = Computer(func)
     player_b = Sunfish()
 
     while True:
