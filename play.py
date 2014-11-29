@@ -27,13 +27,17 @@ def get_model_from_pickle(fn):
     return predict
 
 strip_whitespace = re.compile(r"\s+")
-translate_pieces = string.maketrans(".PNBRQKpnbrqk", "\x00" + "\x01\x02\x03\x04\x05\x06" + "\x08\x09\x0a\x0b\x0c\x0d")
+# translate_pieces = string.maketrans(".PNBRQKpnbrqk", "\x00" + "\x01\x02\x03\x04\x05\x06" + "\x08\x09\x0a\x0b\x0c\x0d")
+translate_pieces = string.maketrans(".pnbrqkPNBRQK", "\x00" + "\x01\x02\x03\x04\x05\x06" + "\x08\x09\x0a\x0b\x0c\x0d")
 
-def sf2array(pos):
+def sf2array(pos, flip):
     # Create a numpy array from a sunfish representation
     pos = strip_whitespace.sub('', pos.board) # should be 64 characters now
     pos = pos.translate(translate_pieces)
-    return numpy.fromstring(pos, dtype=numpy.int8)
+    m = numpy.fromstring(pos, dtype=numpy.int8)
+    if flip:
+        m = numpy.fliplr(m.reshape(8, 8)).reshape(64)
+    return m
 
 
 def negamax(pos, depth, alpha, beta, color, func):
@@ -46,27 +50,32 @@ def negamax(pos, depth, alpha, beta, color, func):
     for move in pos.genMoves():
         pos_child = pos.move(move)
         moves.append(move)
-        X.append(sf2array(pos_child))
+        # print sf2array(pos_child, flip=(color==1)).reshape(8, 8)
+        X.append(sf2array(pos_child, flip=(color==1)))
 
     if len(X) == 0:
         raise Exception('eh?')
         # TODO: should treat checkmate
 
     # Use model to predict scores
-    scores = -func(X)
+    scores = func(X)
 
-    child_nodes = sorted(zip(scores, moves), reverse=(color==1))
+    child_nodes = sorted(zip(scores, moves), reverse=True)
 
     best_value = float('-inf')
     best_move = None
     
     for score, move in child_nodes:
+        crdn = sunfish.render(move[0]) + sunfish.render(move[1])
+
         if depth == 1:
             value = score # * color
         else:
             pos_child = pos.move(move)
             neg_value, _ = negamax(pos_child, depth-1, -beta, -alpha, -color, func)
             value = -neg_value
+
+        # print '\t' * (3 - depth), crdn, score, value
 
         if value > best_value:
             best_value = value
@@ -95,11 +104,9 @@ class Computer(Player):
         assert(gn_current.board().turn == 0)
 
         if gn_current.move is not None:
-            print 'applying last move'
             # Apply last_move
             crdn = str(gn_current.move)
             move = (119 - sunfish.parse(crdn[0:2]), 119 - sunfish.parse(crdn[2:4]))
-            print gn_current.move, move
             self._pos = self._pos.move(move)
 
         for depth in xrange(1, 5):
@@ -108,9 +115,9 @@ class Computer(Player):
             
             t0 = time.time()
             best_value, best_move = negamax(self._pos, depth, alpha, beta, 1, self._func)
-            print depth, best_value, best_move, time.time() - t0
+            crdn = sunfish.render(best_move[0]) + sunfish.render(best_move[1])
+            print depth, best_value, crdn, time.time() - t0
             depth += 1
-
 
         self._pos = self._pos.move(best_move)
         crdn = sunfish.render(best_move[0]) + sunfish.render(best_move[1])
