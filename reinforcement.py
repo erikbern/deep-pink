@@ -6,6 +6,7 @@ from parse_game import bb2array
 import numpy
 import random
 import pickle
+from theano.tensor.nnet import sigmoid
 
 
 def get_params(fn):
@@ -29,19 +30,18 @@ def get_update(Ws, bs, learning_rate=1e-6, momentum=0.9):
     Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
     x, fx = train.get_model(Ws_s, bs_s)
 
-    z = T.exp(fx)
+    # Ground truth (who won)
+    y = T.vector('y')
 
-    # Weights (w)
-    w = T.vector('w')
-
-    # Compute loss 
-    loss = -T.dot(z, w)
+    # Compute loss (just log likelihood of a sigmoid fit)
+    y_pred = sigmoid(fx)
+    loss = -( y * T.log(y_pred) + (1 - y) * T.log(1 - y_pred)).mean()
 
     # Updates
     updates = train.nesterov_updates(loss, Ws_s + bs_s, learning_rate, momentum)
     
     f_update = theano.function(
-        inputs=[x, w],
+        inputs=[x, y],
         outputs=loss,
         updates=updates,
         )
@@ -82,10 +82,8 @@ def game(f_pred, f_train):
         ps = zs / Z
         i = weighted_random_sample(ps)
 
-        # Add all observations
-        data.append((b.turn, Xs[i], 1.0 / zs[i]))
-        for x in Xs:
-            data.append((b.turn, x, -1.0 / Z))
+        # Append moves
+        data.append((b.turn, Xs[i]))
 
         gn = gns[i]
         b = gn.board()
@@ -93,12 +91,10 @@ def game(f_pred, f_train):
     if not b.is_checkmate():
         return
 
-    W = numpy.array([((t ^ b.turn)*2-1) * w for t, x, w in data], dtype=theano.config.floatX)
-    X = numpy.array([x for t, x, w in data], dtype=theano.config.floatX)
+    X = numpy.array([x for t, x in data], dtype=theano.config.floatX)
+    Y = numpy.array([(t ^ b.turn) for t, x in data], dtype=theano.config.floatX)
 
-    for i in xrange(100):
-        print f_train(X, W)
-
+    f_train(X, Y)
 
 def main():
     Ws, bs = get_params('model.pickle')
