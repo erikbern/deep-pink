@@ -7,6 +7,8 @@ import numpy
 import random
 import pickle
 from theano.tensor.nnet import sigmoid
+import sunfish
+from play import sf2array
 
 
 def get_params(fn):
@@ -26,7 +28,7 @@ def get_predict(Ws, bs):
     return predict
 
 
-def get_update(Ws, bs, learning_rate=1e-6, momentum=0.9):
+def get_update(Ws, bs, learning_rate=1e-2, momentum=0.9):
     Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
     x, fx = train.get_model(Ws_s, bs_s)
 
@@ -37,12 +39,15 @@ def get_update(Ws, bs, learning_rate=1e-6, momentum=0.9):
     y_pred = sigmoid(fx)
     loss = -( y * T.log(y_pred) + (1 - y) * T.log(1 - y_pred)).mean()
 
+    # Metrics on the number of correctly predicted ones
+    frac_correct = ((fx > 0) * y + (fx < 0) * (1 - y)).mean()
+
     # Updates
     updates = train.nesterov_updates(loss, Ws_s + bs_s, learning_rate, momentum)
     
     f_update = theano.function(
         inputs=[x, y],
-        outputs=loss,
+        outputs=[loss, frac_correct],
         updates=updates,
         )
 
@@ -58,22 +63,20 @@ def weighted_random_sample(ps):
 
 
 def game(f_pred, f_train):
-    print 'new game...'
-    gn = chess.pgn.Game()
-    b = gn.board()
+    pos = sunfish.Position(sunfish.initial, 0, (True,True), (True,True), 0, 0)
 
     data = []
 
-    while not b.is_game_over():
+    max_turns = 100
+
+    for turn in xrange(max_turns):
         # Generate all possible moves
         Xs = []
-        gns = []
-        for move in b.legal_moves:
-            gn_new = chess.pgn.GameNode()
-            gn_new.parent = gn
-            gn_new.move = move
-            Xs.append(bb2array(gn_new.board(), flip=b.turn))
-            gns.append(gn_new)
+        new_poss = []
+        for move in pos.genMoves():
+            new_pos = pos.move(move)
+            Xs.append(sf2array(new_pos, False))
+            new_poss.append(new_pos)
 
         # Calculate softmax probabilities
         ys = f_pred(Xs)
@@ -83,26 +86,47 @@ def game(f_pred, f_train):
         i = weighted_random_sample(ps)
 
         # Append moves
-        data.append((b.turn, Xs[i]))
+        data.append((turn % 2, Xs[i]))
+        pos = new_poss[i]
 
-        gn = gns[i]
-        b = gn.board()
-    
-    if not b.is_checkmate():
+        if pos.board.find('K') == -1:
+            break
+
+    if turn == max_turns - 1:
         return
 
-    X = numpy.array([x for t, x in data], dtype=theano.config.floatX)
-    Y = numpy.array([(t ^ b.turn) for t, x in data], dtype=theano.config.floatX)
+    # White moves all even turns
+    # If turn is even, it means white just moved, and black is up next
+    # That means if turn is even, all even (black) boards are losses
+    # If turn is odd, all odd (white) boards are losses
+    win = (turn % 2) # 0 = white, 1 = black
 
-    f_train(X, Y)
+    X = numpy.array([x for t, x in data], dtype=theano.config.floatX)
+    Y = numpy.array([(t ^ win) for t, x in data], dtype=theano.config.floatX)
+
+    loss, frac_correct = f_train(X, Y)
+
+    return len(data), loss, frac_correct
+
 
 def main():
     Ws, bs = get_params('model.pickle')
     f_pred = get_predict(Ws, bs)
     f_train = get_update(Ws, bs)
 
+    i, n, l, c = 0, 0.0, 0.0, 0.0
+
     while True:
-        game(f_pred, f_train)
+        r = game(f_pred, f_train)
+        if r is None:
+            continue
+        i += 1
+        n_t, l_t, c_t = r
+        n = n*0.99 + n_t
+        l = l*0.99 + l_t*n_t
+        c = c*0.99 + c_t*n_t
+        print '%6d %9.5f %9.5f' % (i, l / n, c / n)
+
 
 if __name__ == '__main__':
     main()
