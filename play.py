@@ -47,7 +47,7 @@ def negamax(pos, depth, alpha, beta, color, func):
     moves = []
     X = []
     pos_children = []
-    for move in pos.genMoves():
+    for move in pos.gen_moves():
         pos_child = pos.move(move)
         moves.append(move)
         X.append(sf2array(pos_child, flip=(color==1)))
@@ -116,7 +116,7 @@ class Computer(Player):
         self._maxd = maxd
 
     def move(self, gn_current):
-        assert(gn_current.board().turn == 0)
+        assert(gn_current.board().turn == True)
 
         if gn_current.move is not None:
             # Apply last_move
@@ -185,7 +185,7 @@ class Sunfish(Player):
     def move(self, gn_current):
         import sunfish
 
-        assert(gn_current.board().turn == 1)
+        assert(gn_current.board().turn == False)
 
         # Apply last_move
         crdn = str(gn_current.move)
