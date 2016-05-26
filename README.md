@@ -1,7 +1,7 @@
 deep-pink
 =========
 
-Deep Pink is a chess AI that learns to play chess using deep learning. [Here](http://erikbern.com/?p=841) is a  blog post providing some details about how it works.
+Deep Pink is a chess AI that learns to play chess using deep learning. [Here](http://erikbern.com/2014/11/29/deep-learning-for-chess/) is a  blog post providing some details about how it works.
 
 There is a pre-trained model in the repo, but if you want to train your own model you need to download pgn files and run `parse_game.py`. After that, you need to run `train.py`, preferrably on a GPU machine since it will be 10-100x faster. This might take several days for a big model.
 
