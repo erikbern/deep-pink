@@ -177,9 +177,10 @@ class Human(Player):
 
 
 class Sunfish(Player):
-    def __init__(self, maxn=1e4):
+    def __init__(self, secs=1):
+        self._searcher = sunfish.Searcher()
         self._pos = sunfish.Position(sunfish.initial, 0, (True,True), (True,True), 0, 0)
-        self._maxn = maxn
+        self._secs = secs
 
     def move(self, gn_current):
         import sunfish
@@ -192,7 +193,7 @@ class Sunfish(Player):
         self._pos = self._pos.move(move)
 
         t0 = time.time()
-        move, score = sunfish.search(self._pos, maxn=self._maxn)
+        move, score = self._searcher.search(self._pos, self._secs)
         print time.time() - t0, move, score
         self._pos = self._pos.move(move)
 
@@ -209,12 +210,12 @@ def game(func):
     gn_current = chess.pgn.Game()
 
     maxd = random.randint(1, 2) # max depth for deep pink
-    maxn = 10 ** (2.0 + random.random() * 1.0) # max nodes for sunfish
+    secs = random.random() # max seconds for sunfish
 
-    print 'maxd %f maxn %f' % (maxd, maxn)
+    print 'maxd %f secs %f' % (maxd, secs)
 
     player_a = Computer(func, maxd=maxd)
-    player_b = Sunfish(maxn=maxn)
+    player_b = Sunfish(secs=secs)
 
     times = {'A': 0.0, 'B': 0.0}
     
