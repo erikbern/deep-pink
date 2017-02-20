@@ -1,4 +1,5 @@
 import train
+import load
 import theano
 import theano.tensor as T
 # import chess, chess.pgn
@@ -31,7 +32,7 @@ def get_params(fns):
 
 
 def get_predict(Ws_s, bs_s):
-    x, p = train.get_model(Ws_s, bs_s)
+    x, p = load.get_model(Ws_s, bs_s)
     
     predict = theano.function(
         inputs=[x],
@@ -41,7 +42,7 @@ def get_predict(Ws_s, bs_s):
 
 
 def get_update(Ws_s, bs_s):
-    x, fx = train.get_model(Ws_s, bs_s)
+    x, fx = load.get_model(Ws_s, bs_s)
 
     # Ground truth (who won)
     y = T.vector('y')
@@ -127,7 +128,7 @@ def game(f_pred, f_train, learning_rate, momentum=0.9):
 
 def main():
     Ws, bs = get_params(['model_reinforcement.pickle', 'model.pickle'])
-    Ws_s, bs_s = train.get_parameters(Ws=Ws, bs=bs)
+    Ws_s, bs_s = load.get_parameters(Ws=Ws, bs=bs)
     f_pred = get_predict(Ws_s, bs_s)
     f_train = get_update(Ws_s, bs_s)
 
